@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Grisaille</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    body {
+      margin: 0;
+      padding: 1.5rem;
+      background: #111;
+      color: #eee;
+    }
+    h1 {
+      text-align: center;
+      margin-top: 0;
+      font-size: 1.8rem;
+    }
+    .app-container {
+      max-width: 1150px;
+      margin: 0 auto;
+    }
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 1rem;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: 1.5rem;
+      padding: 1rem;
+      background: #1b1b1b;
+      border-radius: 12px;
+      border: 1px solid #333;
+    }
+    label {
+      opacity: 0.9;
+      font-size: 0.95rem;
+    }
+    input[type="file"] {
+      padding: 0.4rem;
+      background: #222;
+      border-radius: 6px;
+      border: 1px solid #444;
+      color: #ddd;
+    }
+    input[type="range"] {
+      width: 180px;
+    }
+    .slider-label {
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+    }
+    .slider-value {
+      opacity: 0.7;
+      font-size: 0.8rem;
+    }
+    .badge {
+      padding: 0.1rem 0.4rem;
+      border-radius: 999px;
+      background: #333;
+      font-size: 0.75rem;
+      margin-left: 0.25rem;
+      opacity: 0.9;
+    }
+    .canvas-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1rem;
+    }
+    .canvas-card {
+      background: #1b1b1b;
+      padding: 0.75rem 0.75rem 1rem;
+      border-radius: 12px;
+      border: 1px solid #333;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      align-items: center;
+    }
+    canvas {
+      max-width: 100%;
+      border-radius: 8px;
+      background: #000;
+    }
+  </style>
+</head>
+<body>
+<div class="app-container">
+
+  <h1>Decomposer</h1>
+
+  <div class="controls">
+    <div>
+      <label for="imageInput">Upload Image:</label><br>
+      <input type="file" id="imageInput" accept="image/*">
+    </div>
+
+    <div class="slider-label">
+      <!-- <span>Dead Layer Steps <span class="badge">3–9</span></span> -->
+      <span>Dead Layer</span>
+      <input type="range" id="stepsRange" min="3" max="9" value="5">
+      <span class="slider-value" id="stepsLabel">5 steps</span>
+    </div>
+
+    <div class="slider-label">
+      <span>Glaze Strength <span class="badge">0–100%</span></span>
+      <input type="range" id="glazeRange" min="0" max="100" value="60">
+      <span class="slider-value" id="glazeLabel">60% colour</span>
+    </div>
+  </div>
+
+  <div class="canvas-grid">
+   <div class="canvas-card">
+  <h2>Original</h2>
+  <canvas id="canvasOriginal"></canvas>
+  <button onclick="downloadCanvas('canvasOriginal', 'original.png')">Download</button>
+</div>
+
+<div class="canvas-card">
+  <h2>Brunt Umber Layer</h2>
+  <canvas id="canvasUmber"></canvas>
+  <button onclick="downloadCanvas('canvasUmber', 'umber.png')">Download</button>
+</div>
+
+<div class="canvas-card">
+  <h2>Dead Layer</h2>
+  <canvas id="canvasDead"></canvas>
+  <button onclick="downloadDeadLayerA4()">Download A4</button>
+</div>
+<div class="canvas-card">
+  <h2>Grayscale</h2>
+  <canvas id="canvasGray"></canvas>
+  <button onclick="downloadCanvas('canvasGray', 'grayscale.png')">Download</button>
+</div>
+
+
+<div class="canvas-card">
+  <h2>Glaze</h2>
+  <canvas id="canvasGlaze"></canvas>
+  <button onclick="downloadCanvas('canvasGlaze', 'glaze.png')">Download</button>
+</div>
+  </div>
+
+</div>
+
+<script>
+  // Grab elements safely
+  const canvasGray = document.getElementById("canvasGray");
+const cGray = canvasGray.getContext("2d");
+
+  const canvasOriginal = document.getElementById("canvasOriginal");
+  const canvasUmber    = document.getElementById("canvasUmber");
+  const canvasDead     = document.getElementById("canvasDead");
+  const canvasGlaze    = document.getElementById("canvasGlaze");
+
+  const cO = canvasOriginal.getContext("2d");
+  const cU = canvasUmber.getContext("2d");
+  const cD = canvasDead.getContext("2d");
+  const cG = canvasGlaze.getContext("2d");
+
+  const imageInput = document.getElementById("imageInput");
+  const stepsRange = document.getElementById("stepsRange");
+  const glazeRange = document.getElementById("glazeRange");
+  const stepsLabel = document.getElementById("stepsLabel");
+  const glazeLabel = document.getElementById("glazeLabel");
+
+  let originalImage = null;
+  let originalImageData = null;
+  function downloadDeadLayerA4() {
+  if (!originalImageData) return;
+
+  // A4 at 300 DPI → 3508 × 2480 (but landscape or portrait?)
+  const A4_W = 2480;
+  const A4_H = 3508;
+
+  const exportCanvas = document.createElement("canvas");
+  exportCanvas.width = A4_W;
+  exportCanvas.height = A4_H;
+  const ctx = exportCanvas.getContext("2d");
+
+  // White background
+  ctx.fillStyle = "white";
+  ctx.fillRect(0, 0, A4_W, A4_H);
+
+  const steps = parseInt(stepsRange.value, 10);
+
+  // --- Recompute the dead layer at A4 resolution ---
+  const scaleCanvas = document.createElement("canvas");
+  scaleCanvas.width = A4_W;
+  scaleCanvas.height = A4_H;
+  const scaleCtx = scaleCanvas.getContext("2d");
+
+  // Draw original scaled to A4
+  scaleCtx.drawImage(originalImage, 0, 0, A4_W, A4_H);
+
+  // Convert to grayscale
+  let bigGray = scaleCtx.getImageData(0, 0, A4_W, A4_H);
+  bigGray = toGrayscale(bigGray);
+
+  // Blur
+  bigGray = blurData(bigGray, 1.2);
+
+  // Posterize
+  const bigDead = posterizeGrayscale(bigGray, steps);
+
+  // Draw posterized dead layer
+  ctx.putImageData(bigDead, 0, 0);
+
+  // Overlay numbers on exported A4 canvas
+  overlayRegionLabels(ctx, bigDead, steps);
+
+  // Export
+  const link = document.createElement("a");
+  link.download = "dead-layer-A4.png";
+  link.href = exportCanvas.toDataURL("image/png");
+  link.click();
+}
+
+  function downloadCanvas(id, filename) {
+  const canvas = document.getElementById(id);
+  const link = document.createElement("a");
+  link.download = filename;
+  link.href = canvas.toDataURL("image/png");
+  link.click();
+}
+
+
+  function setCanvasSizes(img) {
+    const maxWidth = 450;
+    const scale = img.width > maxWidth ? maxWidth / img.width : 1;
+    const w = img.width * scale;
+    const h = img.height * scale;
+
+[canvasOriginal, canvasUmber, canvasGray, canvasDead, canvasGlaze].forEach(c => {
+  c.width = w;
+  c.height = h;
+});
+
+
+    return { width: w, height: h };
+  }
+
+  function toGrayscale(imageData) {
+    const data = new Uint8ClampedArray(imageData.data);
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+      data[i] = data[i + 1] = data[i + 2] = gray;
+    }
+    return new ImageData(data, imageData.width, imageData.height);
+  }
+
+  function blurData(imageData, radius = 1.2) {
+    const tmp = document.createElement("canvas");
+    tmp.width = imageData.width;
+    tmp.height = imageData.height;
+    const ctx = tmp.getContext("2d");
+    ctx.putImageData(imageData, 0, 0);
+    ctx.filter = `blur(${radius}px)`;
+    ctx.drawImage(tmp, 0, 0);
+    return ctx.getImageData(0, 0, imageData.width, imageData.height);
+  }
+
+  function posterizeGrayscale(imageData, steps) {
+    const data = new Uint8ClampedArray(imageData.data);
+    const stepSize = 255 / (steps - 1);
+    for (let i = 0; i < data.length; i += 4) {
+      const gray = data[i];
+      const level = Math.round(gray / stepSize);
+      const newGray = level * stepSize;
+      data[i] = data[i + 1] = data[i + 2] = newGray;
+    }
+    return new ImageData(data, imageData.width, imageData.height);
+  }
+
+  function toUmber(imageData) {
+    const data = new Uint8ClampedArray(imageData.data);
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const gray = 0.299 * r + 0.587 * g + 0.114 * b;
+
+      const rU = gray * 0.7 + 40;
+      const gU = gray * 0.5 + 20;
+      const bU = gray * 0.3 + 5;
+
+      data[i]     = Math.max(0, Math.min(255, rU));
+      data[i + 1] = Math.max(0, Math.min(255, gU));
+      data[i + 2] = Math.max(0, Math.min(255, bU));
+    }
+    return new ImageData(data, imageData.width, imageData.height);
+  }
+
+  function glaze(originalData, deadData, amount) {
+    const data = new Uint8ClampedArray(originalData.data.length);
+    for (let i = 0; i < data.length; i += 4) {
+      const rO = originalData.data[i];
+      const gO = originalData.data[i + 1];
+      const bO = originalData.data[i + 2];
+
+      const rD = deadData.data[i];
+      const gD = deadData.data[i + 1];
+      const bD = deadData.data[i + 2];
+
+      data[i]     = (1 - amount) * rD + amount * rO;
+      data[i + 1] = (1 - amount) * gD + amount * gO;
+      data[i + 2] = (1 - amount) * bD + amount * bO;
+      data[i + 3] = 255;
+    }
+    return new ImageData(data, originalData.width, originalData.height);
+  }
+
+  // --- 8-way region detection + one V-label per region ---
+  function overlayRegionLabels(ctx, posterizedData, steps) {
+    const w = posterizedData.width;
+    const h = posterizedData.height;
+    const data = posterizedData.data;
+    const stepSize = 255 / (steps - 1);
+
+    const visited = new Uint8Array(w * h);
+    const regions = [];
+    const minRegionSize = 40; // ignore tiny specks
+
+    const directions = [
+      [-1, 0], [1, 0], [0, -1], [0, 1], // 4-way
+      [-1, -1], [-1, 1], [1, -1], [1, 1] // diagonals = 8-way
+    ];
+
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const idx = y * w + x;
+        if (visited[idx]) continue;
+
+        const baseGray = data[idx * 4]; // r=g=b
+        // Flood-fill this region
+        const queue = [[x, y]];
+        visited[idx] = 1;
+
+        let sumX = 0;
+        let sumY = 0;
+        let count = 0;
+
+        while (queue.length > 0) {
+          const [cx, cy] = queue.pop();
+          const cIndex = cy * w + cx;
+
+          sumX += cx;
+          sumY += cy;
+          count++;
+
+          for (const [dx, dy] of directions) {
+            const nx = cx + dx;
+            const ny = cy + dy;
+            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+            const nIndex = ny * w + nx;
+            if (visited[nIndex]) continue;
+
+            const nGray = data[nIndex * 4];
+            if (nGray === baseGray) {
+              visited[nIndex] = 1;
+              queue.push([nx, ny]);
+            }
+          }
+        }
+
+        if (count < minRegionSize) {
+          // ignore tiny noisy islands
+          continue;
+        }
+
+        const cx = sumX / count;
+        const cy = sumY / count;
+
+        const level = Math.round(baseGray / stepSize); // 0..steps-1
+        const valueNumber = level + 1; // 1..steps, nicer for humans
+
+        regions.push({
+          x: cx,
+          y: cy,
+          value: valueNumber,
+          gray: baseGray
+        });
+      }
+    }
+
+    // Draw labels
+    ctx.save();
+    ctx.font = "24px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    for (const region of regions) {
+      const label = region.value;
+      const isDark = region.gray < 128;
+
+      // subtle outline for readability
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = isDark ? "rgba(0,0,0,0.7)" : "rgba(0,0,0,0.4)";
+      ctx.fillStyle   = isDark ? "rgba(255,255,255,0.9)" : "rgba(0,0,0,0.9)";
+
+      ctx.strokeText(label, region.x, region.y);
+      ctx.fillText(label, region.x, region.y);
+    }
+
+    ctx.restore();
+  }
+
+  function updateAll() {
+    if (!originalImageData) return;
+
+    // Original
+    cO.putImageData(originalImageData, 0, 0);
+
+    // Umber
+    const umberData = toUmber(originalImageData);
+    cU.putImageData(umberData, 0, 0);
+
+    // Dead layer (smooth grayscale → posterized)
+ // Dead layer (smooth grayscale → posterized)
+const grayData = toGrayscale(originalImageData);
+const blurred = blurData(grayData, 1.2);
+
+// Grayscale card
+cGray.putImageData(blurred, 0, 0);
+
+const steps = parseInt(stepsRange.value, 10);
+const deadData = posterizeGrayscale(blurred, steps);
+cD.putImageData(deadData, 0, 0);
+overlayRegionLabels(cD, deadData, steps);
+
+    // Glazed preview
+    const glazeAmount = parseInt(glazeRange.value, 10) / 100;
+    const glazedData = glaze(originalImageData, deadData, glazeAmount);
+    cG.putImageData(glazedData, 0, 0);
+  }
+
+  imageInput.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onload = () => {
+        originalImage = img;
+        const { width, height } = setCanvasSizes(img);
+        cO.drawImage(img, 0, 0, width, height);
+        originalImageData = cO.getImageData(0, 0, width, height);
+        updateAll();
+      };
+      img.src = event.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  stepsRange.addEventListener("input", () => {
+    stepsLabel.textContent = `${stepsRange.value} steps`;
+    updateAll();
+  });
+
+  glazeRange.addEventListener("input", () => {
+    glazeLabel.textContent = `${glazeRange.value}% colour`;
+    updateAll();
+  });
+</script>
+
+</body>
+</html>
